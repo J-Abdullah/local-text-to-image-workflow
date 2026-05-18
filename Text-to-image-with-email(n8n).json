@@ -1,0 +1,335 @@
+{
+  "name": "Text-to-image-with-email(n8n)",
+  "nodes": [
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        0
+      ],
+      "id": "be35ba34-bad4-4cae-9d0b-06232d2000ca",
+      "name": "When chat message received",
+      "webhookId": ""
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:11434/api/chat",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"qwen3.5:9b\",\n  \"stream\": false,\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are an expert image prompt engineer. Take the user description and rewrite it as a detailed, vivid image generation prompt. Write in flowing descriptive prose. Include subject details, setting, lighting, mood, camera angle, art style. Return ONLY the enhanced prompt. No explanations, no extra text.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"={{ $json.chatInput }}\"\n    }\n  ]\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        128,
+        -272
+      ],
+      "id": "b043ba7a-35ad-4c88-b792-a495e7c766f1",
+      "name": "Enhance Prompt (Qwen)"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8188/prompt",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        624,
+        -288
+      ],
+      "id": "f5247c56-1fa7-41be-b5ae-045a7b08658c",
+      "name": "Submit to ComfyUI"
+    },
+    {
+      "parameters": {
+        "amount": 8
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        416,
+        48
+      ],
+      "id": "14ed7c43-61f0-4d5a-94a1-3a357a662ad3",
+      "name": "Wait",
+      "webhookId": ""
+    },
+    {
+      "parameters": {
+        "url": "=http://host.docker.internal:8188/history/{{ $('Submit to ComfyUI').first().json.prompt_id }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        704,
+        48
+      ],
+      "id": "065624a2-aba3-4420-af86-0d5c23c877f2",
+      "name": "Check ComfyUI History"
+    },
+    {
+      "parameters": {
+        "jsCode": "const promptId = $('Submit to ComfyUI').first().json.prompt_id;\nconst history = $input.first().json;\nconst job = history[promptId];\n\nif (!job || !job.status || !job.status.completed) {\n  return [{ json: { completed: false, promptId: promptId } }];\n}\n\nconst imageInfo = job.outputs['11'].images[0];\n\nreturn [{\n  json: {\n    completed: true,\n    promptId: promptId,\n    filename: imageInfo.filename,\n    subfolder: imageInfo.subfolder || '',\n    originalPrompt: $('When chat message received').first().json.chatInput,\n    enhancedPrompt: $('Enhance Prompt (Qwen)').first().json.message.content\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        912,
+        48
+      ],
+      "id": "b7af6e7b-3d44-4964-8b92-723e0e5254c5",
+      "name": "Parse Result"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "7de4e6b9-850d-42b6-a2e7-1ad633746091",
+              "leftValue": "={{ $json.completed }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1120,
+        48
+      ],
+      "id": "f41f6c37-a2ea-4f8f-82ac-49240735c5ee",
+      "name": "Is Image Ready?"
+    },
+    {
+      "parameters": {
+        "url": "http://host.docker.internal:8188/view",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "=filename",
+              "value": "={{ $json.filename }}"
+            },
+            {
+              "name": "subfolder",
+              "value": "={{ $json.subfolder }}"
+            },
+            {
+              "name": "type",
+              "value": "output"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "image"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1296,
+        -192
+      ],
+      "id": "3b5f8524-0698-4c75-9431-65b2349a82c2",
+      "name": "Download Image"
+    },
+    {
+      "parameters": {
+        "sendTo": "YOUR_EMAIL@gmail.com",
+        "subject": "=\ud83c\udfa8 {{ $('Parse Result').first().json.originalPrompt }}",
+        "emailType": "text",
+        "message": "=Your image is ready!  Original request: {{ $('Parse Result').first().json.originalPrompt }}  Enhanced prompt used: {{ $('Parse Result').first().json.enhancedPrompt }}  See attached image.",
+        "options": {
+          "appendAttribution": false,
+          "attachmentsUi": {
+            "attachmentsBinary": [
+              {
+                "property": "image"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1568,
+        -192
+      ],
+      "id": "eeb24a18-def4-4105-8323-309358cc1def",
+      "name": "Send a message",
+      "webhookId": "",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const enhancedPrompt = $('Enhance Prompt (Qwen)').first().json.message.content;\n\nconst payload = {\n  prompt: {\n    \"2\": {\n      inputs: { unet_name: \"flux-2-klein-4b-fp8.safetensors\", weight_dtype: \"default\" },\n      class_type: \"UNETLoader\"\n    },\n    \"3\": {\n      inputs: { clip_name: \"qwen_3_4b.safetensors\", type: \"flux2\", device: \"default\" },\n      class_type: \"CLIPLoader\"\n    },\n    \"4\": {\n      inputs: { vae_name: \"flux2-vae.safetensors\" },\n      class_type: \"VAELoader\"\n    },\n    \"5\": {\n      inputs: { text: enhancedPrompt, clip: [\"3\", 0] },\n      class_type: \"CLIPTextEncode\"\n    },\n    \"6\": {\n      inputs: { text: \"\", clip: [\"3\", 0] },\n      class_type: \"CLIPTextEncode\"\n    },\n    \"8\": {\n      inputs: { width: 1024, height: 1024, batch_size: 1 },\n      class_type: \"EmptyLatentImage\"\n    },\n    \"9\": {\n      inputs: {\n        seed: Math.floor(Math.random() * 1000000000000000),\n        steps: 4,\n        cfg: 1,\n        sampler_name: \"euler\",\n        scheduler: \"simple\",\n        denoise: 1,\n        model: [\"2\", 0],\n        positive: [\"5\", 0],\n        negative: [\"6\", 0],\n        latent_image: [\"8\", 0]\n      },\n      class_type: \"KSampler\"\n    },\n    \"10\": {\n      inputs: { samples: [\"9\", 0], vae: [\"4\", 0] },\n      class_type: \"VAEDecode\"\n    },\n    \"11\": {\n      inputs: { filename_prefix: \"ComfyUI\", images: [\"10\", 0] },\n      class_type: \"SaveImage\"\n    }\n  }\n};\n\nreturn [{ json: payload }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        384,
+        -272
+      ],
+      "id": "8685bba7-d383-4d11-8166-b2644674b221",
+      "name": "Build ComfyUI Payload"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When chat message received": {
+      "main": [
+        [
+          {
+            "node": "Enhance Prompt (Qwen)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enhance Prompt (Qwen)": {
+      "main": [
+        [
+          {
+            "node": "Build ComfyUI Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Submit to ComfyUI": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Check ComfyUI History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check ComfyUI History": {
+      "main": [
+        [
+          {
+            "node": "Parse Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Result": {
+      "main": [
+        [
+          {
+            "node": "Is Image Ready?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Image Ready?": {
+      "main": [
+        [
+          {
+            "node": "Download Image",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Image": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build ComfyUI Payload": {
+      "main": [
+        [
+          {
+            "node": "Submit to ComfyUI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "6053fbeb-15b1-4bf1-80ab-7aacbc1a85f4",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": ""
+  },
+  "id": "",
+  "tags": []
+}
